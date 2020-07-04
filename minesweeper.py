@@ -105,10 +105,10 @@ class Sentence():
         """
         Returns the set of all cells in self.cells known to be mines.
         """
-        # If num of cells equals the count, all cells are mines
+        # If num of cells is equal to the count, all cells are mines
         if len(self.cells) == self.count:
             return self.cells
-
+            
     def known_safes(self):
         """
         Returns the set of all cells in self.cells known to be safe.
@@ -116,35 +116,24 @@ class Sentence():
         # If count is zero, all cells are safe
         if self.count == 0:
             return self.cells
-
+            
     def mark_mine(self, cell):
         """
         Updates internal knowledge representation given the fact that
         a cell is known to be a mine.
         """
-        # If cell is in sentence, remove cell from sentence and lower count by 1
-        copy_cells = self.cells.copy()
-        for sentence_cell in self.cells:
-            if sentence_cell == cell:
-                copy_cells.remove(sentence_cell)
-                self.count -= 1
-                if self.count < 0:
-                    print("ERROR", self)
-        self.cells = copy_cells.copy()
-        # Check sentence for new inferences
+        # Filter out the cell that is known to be a mine and lower count by 1
+        if cell in self.cells:
+            self.cells = set(filter(lambda x:x!=cell, self.cells))
+            self.count -= 1
 
     def mark_safe(self, cell):
         """
         Updates internal knowledge representation given the fact that
         a cell is known to be safe.
         """
-        # If cell is in sentence, remove cell from sentence but leave count as is
-        copy_cells = self.cells.copy()
-        for sentence_cell in self.cells:
-            if sentence_cell == cell:
-                copy_cells.remove(sentence_cell)
-        self.cells = copy_cells.copy()
-
+        # Filter out the cell that is known to be safe
+        self.cells = set(filter(lambda x:x!=cell, self.cells))
 
 class MinesweeperAI():
     """
@@ -185,29 +174,6 @@ class MinesweeperAI():
         for sentence in self.knowledge:
             sentence.mark_safe(cell)
 
-    def check_sentence(self, sentence):
-        """
-        Checks if any safes or mines can be added 
-        from the given sentence and adds them.
-        """
-        # Add any known safes
-        known_safes = sentence.known_safes()
-        if known_safes:
-            for safe_cell in known_safes:
-                self.mark_safe(safe_cell)
-            return True
-
-        # Add any known mine cells to mines
-        known_mines = sentence.known_mines()
-        if known_mines:
-            for mine_cell in known_mines:
-                self.mark_mine(mine_cell)
-            return True
-        
-        # If no knowns
-        return False
-
-
     def add_knowledge(self, cell, count):
         """
         Called when the Minesweeper board tells us, for a given
@@ -223,73 +189,62 @@ class MinesweeperAI():
             5) add any new sentences to the AI's knowledge base
                if they can be inferred from existing knowledge
         """
-       
-       # Mark cell as safe and add it to moves made
-        self.mark_safe(cell)
-        self.moves_made.add(cell)
 
-        # Get surrounding cells to make new sentence, not including any known safes
+        self.moves_made.add(cell)
+        self.mark_safe(cell)
+
+        # Get surrounding cells for new sentence
         surrounding = []
         for i in range(cell[0] - 1, cell[0] + 2):
             for j in range(cell[1] - 1, cell[1] + 2):
-                # Add to surrounding if cell in bounds and not in known safes
+                # Add to surrounding if cell in bounds
                 if 0 <= i < self.height and 0 <= j < self.width:
-                    if (i, j) not in self.safes:
-                        surrounding.append((i, j))
+                    surrounding.append((i, j))
+        # Add new sentence to knowledge
+        self.knowledge.append(Sentence(surrounding, count))
 
-        new_sentence = Sentence(surrounding, count)
-        print(new_sentence)
-        # Add to knowledge if the sentence is not all safes or mines
-        if not self.check_sentence(new_sentence):
-            self.knowledge.append(new_sentence)
-
-        # Loop through knowledge and add any new sentences which can be inferred
         while True:
-            loopA = False
-            # First loop through knowledge base and check for any new known safes, mines, or empty sentences
-            while True:
-                loopB = False
-                for sentence in self.knowledge:
-                    # If there are any knowns, mark them all and remove now empty sentence from knowledge, and loop again
-                    if self.check_sentence(sentence):
-                        self.knowledge.remove(sentence)
-                        loopB = True
-                   # if len(sentence.cells) == 0 and sentence in self.knowledge:
-                  #      self.knowledge.remove(sentence)
-                if not loopB:
-                    break
-            
-            # Get list of all sets in knowledge for reference
-            sets = []
+            loop = False
+            # Check knowledge for sentences with known mines or safes
             for sentence in self.knowledge:
-                sets.append(sentence.cells)
+                # Check for known safes
+                if sentence.count == 0:
+                    self.knowledge.remove(sentence)
+                    for cell in sentence.cells:
+                        self.mark_safe(cell)
+                # Check for known mines:
+                elif sentence.count == len(sentence.cells):
+                    self.knowledge.remove(sentence)
+                    for cell in sentence.cells:
+                        self.mark_mine(cell)
 
-            # Check for inferred sentences
-            length = len(self.knowledge)
-            for i in range(length):
-                for j in range(i + 1, length):
-                    sentence_A = self.knowledge[i]
-                    sentence_B = self.knowledge[j]
-                    # See if sentence_A is found within sentence_B, and infer new sentence if so
-                    if sentence_A.cells.issubset(sentence_B.cells):
-                        inferred_cells = list(sentence_B.cells - sentence_A.cells)
-                        inferred_count = sentence_B.count - sentence_A.count
-                        inferred_sentence = Sentence(inferred_cells, inferred_count)
-                        if inferred_sentence.cells not in sets:
+            # Remove known safes or mines from remaining sentences
+            for sentence in self.knowledge:
+                to_remove = [] # List to track which cells to remove
+                for cell in sentence.cells:
+                    # Check known safes
+                    if cell in self.safes:
+                        to_remove.append(cell)
+                        loop = True
+                    # Check known mines
+                    elif cell in self.mines:
+                        to_remove.append(cell)
+                        sentence.count -= 1
+                        loop = True
+                # Remove cells
+                sentence.cells = set(filter(lambda x:x not in to_remove, sentence.cells))
+
+            # Infer any new sentences
+            for sentence1 in self.knowledge:
+                for sentence2 in self.knowledge:
+                    if sentence1.cells.issubset(sentence2.cells):
+                        inferred_sentence = Sentence((sentence2.cells - sentence1.cells), (sentence2.count - sentence1.count))
+                        if len(inferred_sentence.cells) > 0 and inferred_sentence not in self.knowledge:
                             self.knowledge.append(inferred_sentence)
-                            loopA = True       
-                    # Check subset vice-versa
-                    if sentence_B.cells.issubset(sentence_A.cells):
-                        inferred_cells = list(sentence_A.cells - sentence_B.cells)
-                        inferred_count = sentence_A.count - sentence_B.count
-                        inferred_sentence = Sentence(inferred_cells, inferred_count)
-                        if inferred_sentence.cells not in sets:
-                            self.knowledge.append(inferred_sentence)
-                            loopA = True
-            if not loopA:
+                            loop = True
+            # If changes have been made to knowledge, loop again
+            if not loop:
                 break
-
-        print ("Mines", self.mines)
 
     def make_safe_move(self):
         """
@@ -300,13 +255,9 @@ class MinesweeperAI():
         This function may use the knowledge in self.mines, self.safes
         and self.moves_made, but should not modify any of those values.
         """
-
-        # Get all the possible safe moves that are not in moves_made
-        possible_moves = []
-        for move in self.safes:
-            if move not in self.moves_made:
-                possible_moves.append(move)
-
+        # Possible moves are moves that are known safes and not already made
+        possible_moves = list(filter(lambda x:x not in self.moves_made, list(self.safes)))
+        # Make random choice, or return none if no safe moves
         if possible_moves:
             return random.choice(possible_moves)
         else:
@@ -319,19 +270,15 @@ class MinesweeperAI():
             1) have not already been chosen, and
             2) are not known to be mines
         """
-        
-        # Get all possible moves in a list
         possible_moves = []
-
-        # Check every cell in board
         for i in range(self.height):
             for j in range(self.width):
                 move = (i, j)
                 if move not in self.moves_made and move not in self.mines:
                     possible_moves.append(move)
-        
-        # Randomly select a possible move
+        # Make random choice, or return none if no safe moves
         if possible_moves:
             return random.choice(possible_moves)
         else:
             return None
+            
